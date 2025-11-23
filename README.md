@@ -1,185 +1,435 @@
-# Tema: Generator semnal PWM
+# Documentație Tehnică - Generator Semnal PWM
+### Echipa: Neamu Ciprian, Voiculescu Nicolae, Babencu Cristian
+### Grupa: 333AA
+## 1. Introducere
 
-## Background
+Această documentație descrie implementarea unui periferic hardware pentru generarea semnalelor PWM (Pulse Width Modulation) în limbajul Verilog. Perifericul este conceput să funcționeze ca un modul slave într-un sistem mai complex, comunicând prin protocolul SPI și oferind control flexibil asupra caracteristicilor semnalului PWM generat.
 
-În cadrul multor dispozitive electronice, inclusiv microcontrolere ca ATmega328P care se află pe plăci Arduino Uno, se regăsesc circuite dedicate pentru generarea semnalelor de tip PWM (Pulse Width Modulation).
-Aceste semnale sunt foarte utile, putând fi aplicate asupra elementelor optoelectronice (oricăror tipuri de LED-uri) pentru a ajusta luminozitatea lor, a controla turația sau direcția motoarelor electrice, și multe alte nenumărate aplicații.
-Semnalele de tip PWM au niște caracteristici universale (perioada semnalului, aliniere și factor de umplere), apoi fiecare producator poate adăuga diferite specificații (exemplu poate fi generare de semnale complementară sau cu timp mort).
+### 1.1 Structura Modulară
 
-1. Perioada semnalului reprezintă timpul în care secvența activă și inactivă determinată de factorul de umplere trebuie să fie completată. De obicei se dă fie în interval de timp, sau se poate da frecvența semnalului (inversul perioadei).
-2. Factorul de umplere reprezintă partea din acea perioadă în care semnalul PWM va fi activ. De obicei se oferă printr-un procentaj sau unitate de timp.
-3. Alinierea PWM-ului se referă la modul în care PWM-ul începe generarea semnalului (fie activ fie inactiv).
+Perifericul este împărțit în 5 module principale, fiecare cu responsabilități distincte:
+- **spi_bridge**: Gestionează comunicația SPI cu masterul extern
+- **instr_dcd**: Decodifică instrucțiunile primite și coordonează accesul la registre
+- **regs**: Stochează configurația perifericului în registre hardware
+- **counter**: Implementează numărătorul configurable care furnizează baza de timp
+- **pwm_gen**: Generează semnalul PWM efectiv pe baza configurației și valorii counter-ului
 
-Un exemplu se poate vedea în graficul de mai jos:
+## 2. Modulul SPI Bridge (`spi_bridge.v`)
 
-<div align="center">
+### 2.1 Scopul Modulului
 
-![Un exemplu de formă de undă PWM cu diferite configurări](media/example_pwm.png)
+Bridge-ul SPI asigură interfața de comunicație între masterul extern și logica internă a perifericului. Acesta operează în domeniul de ceas SPI (SCLK) și transferă date byte cu byte către/de la modulele interne.
 
-_Figură: Forma de undă pentru un semnal PWM de perioadă de 8 cicli de ceas cu factor de umplere de 25%_
+### 2.2 Detalii de Implementare
 
-</div>
+#### 2.2.1 Protocoalele SPI Utilizate
+Implementarea respectă configurația SPI standard cu:
+- **CPOL = 0, CPHA = 0**: Datele sunt plasate pe frontul descrescător și citite pe frontul crescător al SCLK
+- **MSB first**: Primul bit transmis este cel mai semnificativ
+- **Chip Select activ low**: Comunicarea este activă când `cs_n = 0`
 
-## Arhitectura modulului
+#### 2.2.2 Logica de Recepție (MOSI)
 
-Arhitectura perifericelor nu sunt standard, ci sunt modelate în funcție de cerințele producătorului și a pieței în care acestea vor fi folosite.
-Astfel, implementarea lor e particulară de la producător la producător, dar ca funcționalitate modulele de genul sunt asemănătoare.
-În cadrul acestei teme, acest modul îl putem asocia cu un periferic care poate fi integrat în designuri mai complexe, precum un microcontroller.
-Acestea fiind zise, generatorul de PWM are următoarele componente majore pe care va trebui să le dezvoltați:
+```verilog
+byte_buffer <= byte_buffer << 1;
+byte_buffer[0] <= mosi;
+```
 
-<div align="center">
+Implementarea folosește un registru de deplasare (shift register) pentru a asambla biții primiți secvențial în bytes completi. La fiecare front crescător de SCLK:
+1. Conținutul buffer-ului este deplasat la stânga cu o poziție
+2. Noul bit de pe linia MOSI este plasat în poziția LSB
+3. După 8 cicluri, în buffer se găsește un byte complet, semnalizat prin `byte_sync = 1`
 
-![ Nivelul de ansamblu al perifericului, împreună cu legăturile dintre submodule](media/top_level.png)
+#### 2.2.3 Detectarea Primului Byte
 
-_Figură: Nivelul de ansamblu al perifericului, împreună cu legăturile dintre submodule_
+Primul byte primit are o semnificație specială (conține opcode-ul operației), astfel că bridge-ul trebuie să-l detecteze:
 
-</div>
+```verilog
+if (bits_read == 1) begin
+    is_write <= byte_buffer[0];
+    is_read <= ~byte_buffer[0];
+end
+```
 
-### Bridge-ul de comunicație
+La bitul 1 (al doilea bit citit), modulul examinează bitul 7 al primului byte (care se află în `byte_buffer[0]` datorită shift-ului) pentru a determina dacă operația este de scriere (1) sau citire (0).
 
-Pentru orice periferic, trebuie să existe o metodă prin care acesta să poată comunica cu mediul extern pentru a putea fi programat de către utilizator (de exemplu un inginer software embedded).
-În industrie se folosesc diverse protocoale de comunicație, fiecare cu avantajele si dezavantajele lui, dar cel mai important aspect de reținut este locul în care acesta se utilizează.
-Având în vedere că tema are scop didactic, vom utiliza un protocol serial ușor de înteles, care e [SPI](https://en.wikipedia.org/wiki/Serial_Peripheral_Interface) (Serial Peripheral Interface).
-Detaliile legat de protocol le găsiți și pe link-ul atașat de Wikipedia sau [aici](https://www.analog.com/en/resources/analog-dialogue/articles/introduction-to-spi-interface.html), dar noi nu vom complet protocolul.
-Ce trebuie să știti este în felul următor:
+Flag-ul `was_first_byte_read` se activează după completarea primului byte și determină comportamentul ulterior al bridge-ului.
 
-- SPI este un protocol serial master-slave, adică mesajele vor fi împărțite pe biți și vor fi trimiși pe o linie într-o ordine aleasă (în cazul nostru va fi MSB primul bit transmis din mesaj), de la master, care cere sau trimite date către slave;
-- SPI prezintă un ceas (SCLK) pe care trimite și primește datele. În standardul complet, datele pot fi aliniate diferit în funcție de niște modificatori, pe numele lor CPOL (**c**lock **pol**arity) și CPHA (**c**lock **pha**se), care în cazul modulului vor rămâne 0 amândoi.
-Asta rezultă faptul că datele vor fi plasate pe linie pe frontul descrescător și citite pe frontul crescător al ceasului;
-- Există un semnal prin care slave-ul este înștiințat de activarea liniei de date pentru următoarele transferuri, fiind CS (**C**hip **S**elect). Acesta este un semnal activ pe valoarea joasă a liniei (practic ca la reset-ul flip-flopilor);
-- Are 2 linii de comunicație, MISO (Master In Slave Out) și MOSI (Master Out Slave In), fiecare cu timingul lui dat de CPOL și CPHA. Având în vedere că perifericul nostru este un slave pentru restul sistemului, atunci MISO este linia de scriere și MOSI este linia de citire a perifericului.
+#### 2.2.4 Logica de Transmisie (MISO)
 
-Acest semnal de ceas al SPI-ului nu este neapărat identic cu cel al perifericului, nici în perioadă nici în fază, și de aceea trebuie considerată sincronizarea datelor provenite de la sistem către periferic și înapoi.
-Pentru asta, e recomandat să urmăriți lecția de design, secțiunea bonus.
-În cazul arhitecturii noastre, vom considera că **SCLK = 10MHz și ceasul perifericului = 10MHz, ceasurile fiind sincrone** și că pot veni oricâte secvențe de 8 biți vrea masterul să comunice cât timp CS este negat.
+```verilog
+assign miso = (was_first_byte_read && is_write) ? data_out[bits_written] : 1'b0;
+```
 
-### Decodorul de instrucțiuni
+Pentru operațiile de citire, după ce primul byte a fost procesat, bridge-ul transmite pe MISO byte-ul de date primit de la modulul `instr_dcd` prin semnalul `data_out`. Biții sunt trimiși în ordine, indexați prin counter-ul `bits_written`.
 
-Orice tip de circuit integrat care prelucrează niște informații are o logică în spate care procesează informațiile trimise de utilizator.
-Având în vedere că toate aceste informații sunt niște secvențe de biți, acestea trebuie "traduse" astfel încât perifericul să poată efectua niște operații.
-Așadar, decodorul de instrucțiuni este asemănat unui FSM, care citește secvențele de biți și execută operațiile care au fost descrise de arhitect.
-Decodorul are următoarele etape, fiecare de lungimea unui byte:
+### 2.3 Sincronizarea Domeniilor de Ceas
 
-1. Faza de setup: aici procesează primul byte din mesajul transmis prin bridge-ul de SPI. În acest byte se află toate informațiile necesare pentru un transfer de date cu sistemul, prin care se poate programa perifericul. În tabelul de mai jos regăsiți informația specifică cum este decodificat acest byte:
+Deși cerința specifică că SCLK și CLK sunt ambele la 10MHz și sincrone, implementarea actuală operează exclusiv în domeniul SCLK pentru logica SPI. Semnalul `byte_sync` servește drept punct de sincronizare între cele două domenii, fiind utilizat de modulul `instr_dcd` care operează în domeniul CLK.
 
-| Rază | Denumire   | Semnificație                                                                                                                                      |
-|------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| 7    | Read/Write | Semnifică dacă instrucțiunea este de tip citire sau scriere, unde 1 reprezintă write și 0 read                                                    |
-| 6    | High/Low   | Semnifică zona din registru (MSB/LSB, mai multe detalii în secțiunea următoare) unde byte-ul de date va fi scris, 1 fiind [15:8] și 0 fiind [7:0] |
-| 5:0  | Adresa     | Adresa la care acel registru poate fi adresat, mai multe detalii în secțiunea următoare                                                           |
+## 3. Modulul Decodor de Instrucțiuni (`instr_dcd.v`)
 
-2. Faza de date: aici va fi primit sau transmis byte-ul care reprezintă datele propriu-zise în funcție de ce s-a identificat în faza de setup. Toate aceste date sunt transmise pe 8 biți, deși registrii sunt pe 16 (mai multe detalii în faza următoare).
+### 3.1 Scopul Modulului
 
-<div align="center">
+Decodorul de instrucțiuni acționează ca un FSM (Finite State Machine) care interpretează secvențele de bytes primite de la SPI și generează semnalele de control corespunzătoare pentru accesul la registre.
 
-![Forma de undă pentru o operație de scriere](media/write.png)
+### 3.2 Stările FSM
 
-_Figură: Forma de undă pentru o operație de scriere, în cele 2 etape. Atenție la domeniile de ceas, aici e in raport cu ceasul SPI!_
+Modulul utilizează un registru de stare pe 3 biți (`internal_state`) care codifică atât starea curentă cât și informații despre operația în curs:
 
-</div>
+```
+Bit 2: 0 = Necesită primul byte | 1 = Primul byte procesat
+Bit 1: 0 = Operație READ | 1 = Operație WRITE
+Bit 0: 0 = Zona LOW [7:0] | 1 = Zona HIGH [15:8]
+```
 
-În figura de mai sus se poate vedea un transfer de date în 2 etape. Prima dată, se poate vedea cum după 8 cicluri de ceas SPI, se captează numărul `0x93`, care, dacă despărțim în biți (`1001_0011`), putem observa că este o operație de scriere în registrii, în secțiunea LSB al spațiului de 16 biți.
+Stările definite ca parametri:
+- `NEEDS_FIRST_BYTE (3'b000)`: Starea inițială, în așteptarea primului byte
+- `READY_READ_LO (3'b100)`: Pregătit pentru citire din zona LOW
+- `READY_READ_HI (3'b101)`: Pregătit pentru citire din zona HIGH
+- `READY_WRITE_LO (3'b110)`: Pregătit pentru scriere în zona LOW
+- `READY_WRITE_HI (3'b111)`: Pregătit pentru scriere în zona HIGH
 
-### Blocul de regiștrii
+### 3.3 Procesarea Setup Byte-ului
 
-Orice periferic are nevoie de o zonă în care să se rețină informații legate de configurația dispozitivului și a modului de funcționare. 
-De aceea, în orice periferic există o zonă compusă din regiștrii, fiecare cu specificația lor, care vor reține aceste informații, atât în timpul funcționării, cât și eventual dacă blocul este supus unui regim de "sleep". 
-În orice fișă de specificație există menționat un tabel sau hartă de registrii, în care se vor regăsi minim o denumire, adresă, mărime, modul de accesare a datelor și o descriere pentru utilitatea lor sau ce semnificație au biții.
-În designul nostru, configurația va fi reținută în registrii, care sunt practic celule de tip flip-flop D, cu mărimi din mulțimea multiplilor lui 8 pentru adresare, ce sunt descriși în tabelul de mai jos:
+Când `byte_sync` devine activ și starea este `NEEDS_FIRST_BYTE`, decodorul extrage informațiile din primul byte:
 
-|      Nume     | Adresă | Access date | Lățime |                                                        Descriere                                                       |
-|:-------------:|:------:|:-----------:|:------:|:----------------------------------------------------------------------------------------------------------------------:|
-|     PERIOD    |  0x00  |     R/W     | [15:0] |                                  Perioada exprimată în ciclii de ceas a numărătorului                                  |
-|   COUNTER_EN  |  0x02  |     R/W     |    1   |                                       Exprimă dacă numărătorul este activ sau nu                                       |
-|    COMPARE1   |  0x03  |     R/W     | [15:0] |                                         Valoare la care semnalul PWM se schimbă                                        |
-|    COMPARE2   |  0x05  |     R/W     | [15:0] |                        Valoare la care semnalul PWM se schimbă (valabil doar pentru descentrare)                       |
-| COUNTER_RESET |  0x07  |      W      |    1   |    Resetează starea numărătorului la 0 după scrierea lui, apoi registrul <br /> se golește după al doilea ciclu de ceas   |
-|  COUNTER_VAL  |  0x08  |      R      | [15:0] |     Practic e adresa la care se poate vedea valoarea numărătorului în <br /> acel moment la care s-a dat instrucțiunea     |
-|    PRESCALE   |  0x0A  |     R/W     |  [7:0] |         Numărul de ciclii de ceas după care numărătorul va fi <br /> incrementat (0 -> 1, 1 -> 2, 2 -> 4, etc.)           |
-|   UPNOTDOWN   |  0x0B  |     R/W     |    1   |         Direcția în care numărătorul incrementează valoarea internă (1 -> incrementare, 0 -> decrementare)             |
-|     PWM_EN    |  0x0C  |     R/W     |    1   |              Activează canalul de ieșire a semnalului PWM; lasă blocat linia în <br /> starea în care se afla              |
-|   FUNCTIONS   |  0x0D  |     R/W     |  [1:0] |                  Bitul 0 -> aliniere stânga (0) / dreapta (1) <br /> Bitul 1 -> aliniere (0) / nealiniat(1)                |
+```verilog
+internal_state[2] <= 1'b1;              // Marchează procesarea primului byte
+internal_state[1] <= data_in[7];        // R/W bit
+internal_state[0] <= data_in[6];        // HIGH/LOW bit
+address[5:0] <= data_in[5:0];           // Adresa registrului
+```
 
-După cum se poate observa, mărimea datelor utile pentru fiecare tip de registru poate varia, însă decodificatoarele de obicei sunt limitate la a adresa un anumit spațiu de memorie.
-În cazul nostru, fiecare adresă pe care o avem va reprezenta un byte, chiar dacă dimensiunea reprezentativă a registrului poate fi mai mică.
-Orice altă adresă când va fi scrisă către, o să fie ignorată, iar când va fi citită, o să întoarcă valoarea 0.
-Restul de detalii legate de funcționare vor fi precizate în secțiunea aferentă submodulului.
+### 3.4 Procesarea Data Byte-ului
 
-### Numărătorul
+La următorul `byte_sync`, în funcție de starea determinată anterior:
+- **Pentru WRITE**: Byte-ul primit este stocat în `internal_buffer` și flag-ul `send_data` devine activ pentru a semnala modulului `regs` că datele sunt valide
+- **Pentru READ**: Modulul citește valoarea din `data_read` (furnizată de `regs`) și o plasează în `internal_buffer` pentru transmisie către SPI bridge
 
-Numărătorul este o porțiune esențială a perifericului generator de PWM, întrucât acesta oferă baza de timp după care semnalul PWM are durată în timp sau umple perioada alocată.
-În funcție de lățimea numărătorului, avem calitatea sau rezoluția la care semnalul poate fi generat, adică cu cât avem mai mulți biți la dispoziție, cu atât putem controla mai fin factorul de umplere.
-Totuși o altă problemă a perifericului este că trebuie să controlăm și durata perioadei semnalului raportată la timpul dorit, pentru că ceasul funcțional al perifericului o să fie mult prea rapid și o să "termine" de numărat (va da overflow) într-un timp nemăsurabil.
-De aceea, orice numărător are un "prescaler" care limitează incrementarea contorului, astfel încât baza de timp să fie scalată la o unitate de timp mai mare.
+### 3.5 Generarea Semnalelor de Control
 
-Funcționalitățile numărătorului trebuie să fie în felul următor:
-- scalare de timp: controlat de registrul `PRESCALE`, acesta va folosi un contor intern care numără de câți cicli de ceas sunt necesari pentru a incrementa/decrementa cu 1 valoarea contorului;
-- setări de numărare: perioada pe care o numără (`PERIOD`), valori de comparare (`COMPARE1` și `COMPARE2`, utili la PWM), `UPNOTDOWN` care setează direcția de numărare;
-- alte funcționalități: `COUNTER_RESET` va rescrie toți regiștrii de numărare, dar nu va reseta restul perifericului, `COUNTER_EN` va activa numărătorul.
+```verilog
+assign write = (internal_state[2]) ? internal_state[1] : read;
+assign read = (internal_state[2]) ? ~write : 0;
+```
 
-<div align="center">
+Semnalele `read` și `write` sunt generate combinațional pe baza stării curente. Acestea sunt mutual exclusive și sunt active doar după procesarea primului byte.
 
-![Numărătorul cu prescaler setat la 4](media/counter_prescale.png)
+## 4. Modulul de Registre (`regs.v`)
 
-_Figură: Forma de undă a numărătorului cu prescalerul setat la 2, adică va număra de 4 ori pentru incrementarea numărătorului._
+### 4.1 Scopul Modulului
 
-</div>
+Blocul de registre implementează memoria de configurație a perifericului, oferind interfață pentru citire/scriere la adresele definite în specificație și gestionând auto-clear-ul registrului `COUNTER_RESET`.
 
-### Generatorul de PWM
+### 4.2 Harta de Registre
 
-Generatorul de PWM interfațează cu exteriorul, semnalul fiind pasat către dispozitivul extern pe care vreau să îl controlez (fie un LED, motor electric sau driver de tranzistori).
-Acest semnal poate fi generat în diferite moduri în funcție de cerințele programatorului care după va folosi perifericul în acest control, iar aceste moduri sunt reținute în regiștrii `PWM_EN` și `FUNCTIONS`.
-Pe lângă asta, caracteristicile semnalului PWM sunt controlate și de modul în care numărătorul este configurat, întrucât acesta compară valoarea la care acesta se află cu acele valori din `COMPARE1` și `COMPARE2`, și caracterizează durata semnalului PWM.
+| Registru | Adresă | Tip Acces | Lățime | Descriere |
+|----------|--------|-----------|--------|-----------|
+| PERIOD | 0x00 | R/W | [15:0] | Perioada numărătorului în cicluri de ceas |
+| COUNTER_EN | 0x02 | R/W | 1 bit | Activează/dezactivează numărătorul |
+| COMPARE1 | 0x03 | R/W | [15:0] | Prima valoare de comparație pentru PWM |
+| COMPARE2 | 0x05 | R/W | [15:0] | A doua valoare de comparație (mod unaligned) |
+| COUNTER_RESET | 0x07 | W | 1 bit | Resetează counter-ul (auto-clear după 2 cicluri) |
+| COUNTER_VAL | 0x08 | R | [15:0] | Valoarea curentă a counter-ului (read-only) |
+| PRESCALE | 0x0A | R/W | [7:0] | Factor de scalare: divizor = 2^prescale |
+| UPNOTDOWN | 0x0B | R/W | 1 bit | Direcție numărare: 1=UP, 0=DOWN |
+| PWM_EN | 0x0C | R/W | 1 bit | Activează ieșirea PWM |
+| FUNCTIONS | 0x0D | R/W | [1:0] | Configurare mod PWM |
 
-Mecanismul prin care semnalul PWM e generat este descris mai jos:
-1. Sunt setate valorile din regiștrii, mai ales perioada (`PERIOD`), valorile de comparat, (`COMPARE1` și/sau `COMPARE2`), modul de funcționare (`FUNCTIONS`), valoarea de scalare (`PRESCALE`) și modul de incrementare/decrementare (`UPNOTDOWN`).
-2. Apoi numărătorul începe când se scrie 1 în `COUNTER_EN` și semnalul PWM începe a fi generat când `PWM_EN` e activat.
-3. În funcție de `FUNCTIONS`, semnalul PWM începe pe 1 când este aliniat (`FUNCTIONS[1] == 0`) la stânga (`FUNCTIONS[0] == 0`), și 0 la dreapta (`FUNCTIONS[0] == 1`).
-4. Atunci când valoarea numărătorului ajunge la `COMPARE1`, o să își schimbe starea în valoarea opusă și continuă așa până în momentul în care contorul va da overflow/underflow, de unde se reiau de la pasul 3.
-5. Dacă `FUNCTIONS[1] == 1`, nu mai vorbim de aliniere, deci semnalul PWM va începe de la 0, apoi devine 1 când numărătorul ajunge la valoarea `COMPARE1`, și se resetează când ajunge la valoarea lui `COMPARE2`. Acest tip de funcționare e gândit doar pentru `COMPARE1 < COMPARE2`, cazul opus nu trebuie tratat.
+### 4.3 Implementarea Accesului la Registre
 
-<div align="center">
+#### 4.3.1 Operații de Scriere
 
-![Un semnal de PWM aliniat la stânga și la dreapta, prescale 1, semnalul se activează și dezactivează imediat cum counterul ajunge la una din valorile compare.](media/pwm_aligned.png)
+```verilog
+if (write) begin
+    case (addr)
+        PERIOD_ADDRESS: period_reg[7:0] <= data_write;
+        // ... alte registre
+    endcase
+end
+```
 
-_Figură: Un semnal de PWM aliniat la stânga și la dreapta, prescale 1, semnalul se activează și dezactivează imediat cum counterul ajunge la una din valorile compare._
+La fiecare ciclu de ceas, dacă semnalul `write` este activ, modulul decodifică adresa și scrie valoarea din `data_write` în registrul corespunzător. 
 
-</div>
+**Observație importantă**: Implementarea actuală scrie doar în partea LOW [7:0] a registrilor pe 16 biți (PERIOD, COMPARE1, COMPARE2). Bitul HIGH/LOW din instruction byte nu este utilizat în implementarea curentă.
 
-<div align="center">
+#### 4.3.2 Operații de Citire
 
-![Un semnal de PWM nealiniat, prescale 1, semnalul se activează și dezactivează imediat cum counterul ajunge la una din valorile compare.](media/pwm_unaligned.png)
+```verilog
+if (read) begin
+    case (addr)
+        COUNTER_VAL_ADDRESS: buffer_for_reading <= counter_val[7:0];
+        // ... alte registre
+    endcase
+end
+```
 
-_Figură: Un semnal de PWM nealiniat, prescale 0, semnalul se activează și dezactivează imediat cum counterul ajunge la una din valorile compare._
+Pentru citire, valoarea registrului este plasată în `buffer_for_reading`, care este apoi atribuit la `data_read`. Registrul `COUNTER_VAL` este special - el reflectă valoarea dinamică a counter-ului, primită prin input-ul `counter_val`.
 
-</div>
+### 4.4 Auto-Clear pentru COUNTER_RESET
 
-Alte precizări:
+Cerința specifică că registrul `COUNTER_RESET` trebuie să se șteargă automat după 2 cicluri de ceas de la scriere. Implementarea folosește un counter simplu:
 
-1. Activarea semnalului PWM și a numărătorului sunt complet diferite, deși ambele trebuie activate ca la ieșirea `pwm_out` să avem un semnal PWM.
-2. În cazul nostru, funcționarea perifericului se poate modifica în timpul funcționării, adică orice valoare din regiștrii se poate modifica când `COUNTER_EN` sau `PWM_EN` sunt active.
-Însă valorile acestea se vor schimba doar când numărătorul va da overflow/underflow sau se va opri.
-3. `COUNTER_VAL` practic este valoarea numărătorului care poate fi citită de software (programatorul embedded care dă comenzi perifericului prin SPI).
-4. `COUNTER_RESET` resetează valoarea numărătorului, dar nu și restul parametriilor.
+```verilog
+if (counter_reset_reg) begin
+    if (reset_delay_counter) begin
+        counter_reset_reg <= 1'b0;
+        reset_delay_counter <= 1'b0;
+    end else begin
+        reset_delay_counter <= 1'b1;
+    end
+end
+```
 
-## Cerințe
+**Funcționarea**:
+1. **Ciclu 0**: User-ul scrie 1 în `COUNTER_RESET`, `reset_delay_counter` este resetat la 0
+2. **Ciclu 1**: `counter_reset_reg = 1`, `reset_delay_counter` devine 1
+3. **Ciclu 2**: `counter_reset_reg` se șterge la 0, `reset_delay_counter` revine la 0
 
-Având în vedere descrierea modulului de mai sus, cât și funcționarea acestuia, pentru a rezolva această temă, trebuie finalizate cerințele de mai de jos.
-Trebuie ținut cont de faptul că toate cerințele se vor rezolva în echipe de câte 3 persoane, deci trebuie să vă împărțiți în mod echitabil etapele de mai jos pentru a implementa întregul modul:
+Această logică asigură că semnalul de reset este vizibil către modulul `counter` pentru exact 2 cicluri de ceas.
 
-1. Citiți tot enunțul temei cu atenție înainte de scrierea implementării. 
-Asta va fi important să înțelegeți modul de funcționare al perifericului și modul în care veți elabora soluția.
-2. În secțiunea temei aveți un schelet de cod unde apar definițiile modulelor, și pe care voi trebuie să le completați implementările.
-Respectați denumirile semnalelor și nu schimbați antetul modulelor la implementarea lor, mai ales la nivelul `top.v`.
-3. Va trebui să scrieți implementarea fiecărui modul care se află în structura temei, astfel încât legate împreună, să rezulte funcționarea perifericului așa cum e descris în secțiunea **Arhitectura modulului**.
-4. După veți testa acest modul cu ajutorul testbench-ului dat de către noi și verificați că niciun test nu pică.
-La laborator o să vă explice mai multe detalii despre cum ar trebui să știți că soluția nu are probleme.
-5. Apoi va trebui să redactați o documentație sub formă text (LaTex) în care veti explica modalitatea de implementare a temei.
-Asta înseamnă să explicați particularitățile implementației voastre, și mai puțin arhitectura modulului (fiindcă aceasta deja v-a fost prezentată).
+## 5. Modulul Counter (`counter.v`)
 
-Puncte bonus pentru:
+### 5.1 Scopul Modulului
 
-1. Organizarea codului într-un mod coerent (adică variabile denumite clar, împărțirea codulul comportamental în fiecare componentă distinctă);
-2. Comentarii utile (nu scrieți codul în cuvinte, ci explicați de ce ați ales acea implementare, hack-uri folosite pentru acea soluție, sau de ce funcționează deși pare că nu sau că e atipic)l
-3. Documentație clar formulată, urmăriți cerința și indicațiile din temă.
-4. Respectarea tuturor cerințelor.
+Counter-ul furnizează baza de timp pentru generarea semnalului PWM. Acesta poate număra în sus sau în jos, cu o perioadă configurabilă și un prescaler pentru scalarea frecvenței de incrementare.
+
+### 5.2 Prescaler-ul
+
+Prescaler-ul reduce frecvența efectivă de incrementare/decrementare a counter-ului principal:
+
+```verilog
+wire [15:0] prescale_cstn = (16'd1 << prescale);
+```
+
+Valoarea prescaler-ului este calculată ca 2^prescale, astfel:
+- `prescale = 0` → divizor = 1 (incrementare la fiecare ciclu)
+- `prescale = 1` → divizor = 2 (incrementare la 2 cicluri)
+- `prescale = 2` → divizor = 4
+- `prescale = n` → divizor = 2^n
+
+### 5.3 Logica de Numărare
+
+#### 5.3.1 Modul UP (upnotdown = 1)
+
+```verilog
+if (cnt == prescale_cstn) begin
+    cnt <= 16'd1;
+    if (count_val_internal == period) 
+        count_val_internal <= 0;
+    else 
+        count_val_internal <= count_val_internal + 1;
+end
+else cnt <= cnt + 1;
+```
+
+Counter-ul intern `cnt` crește de la 1 la `prescale_cstn`. Când atinge valoarea maximă:
+- Se resetează la 1
+- Counter-ul principal (`count_val_internal`) se incrementează
+- Dacă counter-ul principal atinge `period`, se resetează la 0 (overflow)
+
+#### 5.3.2 Modul DOWN (upnotdown = 0)
+
+```verilog
+if (cnt == 1) begin 
+    cnt <= prescale_cstn;
+    if (count_val_internal == period) 
+        count_val_internal <= 0;
+    else 
+        count_val_internal <= count_val_internal + 1;
+end
+else cnt <= cnt - 1;
+```
+
+În modul DOWN, counter-ul intern `cnt` pornește de la `prescale_cstn` și scade până la 1. **Observație**: Counter-ul principal tot se incrementează (nu decrementează) - doar ritmul de incrementare este controlat de direcția counter-ului intern.
+
+### 5.4 Perioada Efectivă
+
+Counter-ul numără de la 0 la `period` inclusiv, apoi se resetează la 0. Astfel, perioada efectivă este de `period + 1` valori:
+- Pentru `period = 7`: counter-ul ia valorile 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, ...
+- Perioada în cicluri de ceas = (period + 1) × 2^prescale
+
+### 5.5 Reset Manual
+
+Semnalul `count_reset` resetează imediat counter-ul:
+```verilog
+if (!rst_n || count_reset) begin
+    cnt <= 16'd1;
+    count_val_internal <= 16'b0;
+end
+```
+
+Această resetare nu afectează registrele de configurație (period, prescale, etc.), ci doar valorile curente ale counter-elor.
+
+## 6. Modulul Generator PWM (`pwm_gen.v`)
+
+### 6.1 Scopul Modulului
+
+Generatorul PWM produce semnalul de ieșire efectiv pe baza valorii counter-ului și a parametrilor de configurație. Implementarea suportă trei moduri de funcționare distincte.
+
+### 6.2 Modurile de Funcționare
+
+Registrul `functions[1:0]` determină modul de operare:
+
+#### 6.2.1 Mod Aliniat Stânga (functions = 2'b00)
+
+```verilog
+FUNCTION_ALIGN_LEFT: if (!is_counter_about_to_reset) 
+    internal_pwm_comb = (compare1 > count_val);
+```
+
+În acest mod:
+- PWM pornește de la 1 când counter-ul este resetat
+- Rămâne 1 atâta timp cât `count_val < compare1`
+- Trece la 0 când `count_val >= compare1`
+- Revine la 1 când counter-ul dă overflow
+
+**Factor de umplere**: `compare1 / (period + 1)`
+
+#### 6.2.2 Mod Aliniat Dreapta (functions = 2'b01)
+
+```verilog
+FUNCTION_ALIGN_RIGHT: if (!is_counter_about_to_reset) 
+    internal_pwm_comb = (count_val >= compare1);
+```
+
+În acest mod:
+- PWM pornește de la 0 când counter-ul este resetat
+- Rămâne 0 atâta timp cât `count_val < compare1`
+- Trece la 1 când `count_val >= compare1`
+- Revine la 0 când counter-ul dă overflow
+
+**Factor de umplere**: `(period + 1 - compare1) / (period + 1)`
+
+#### 6.2.3 Mod Nealiniat / Range (functions = 2'b1x)
+
+```verilog
+FUNCTION_RANGE_BETWEEN_COMPARES: if (!is_counter_about_to_reset) 
+    internal_pwm_comb = (count_val >= compare1 && count_val < compare2);
+```
+
+În acest mod:
+- PWM pornește de la 0
+- Trece la 1 când `count_val = compare1`
+- Revine la 0 când `count_val = compare2`
+- Cerința menționează că acest mod este valabil doar pentru `compare1 < compare2`
+
+**Factor de umplere**: `(compare2 - compare1) / (period + 1)`
+
+### 6.3 Mecanismul de Anticipare a Overflow-ului
+
+```verilog
+if ((period > 1) && (count_val+1) == (period-1)) 
+    is_counter_about_to_reset <= 1'b1;
+```
+
+Flag-ul `is_counter_about_to_reset` se activează cu 2 cicluri înainte de overflow (când counter e la `period-2`). Acest mecanism permite generatorului PWM să anticipeze tranziția și să pregătească valoarea corectă pentru starea inițială a următoarei perioade.
+
+**Raționament**: La ciclu `period-2`, modulul știe că:
+- Ciclu curent: `count_val = period-2`
+- Ciclu următor: `count_val = period-1`
+- Ciclu după următor: `count_val = 0` (overflow)
+
+Astfel poate seta valoarea inițială corectă (1 pentru align-left, 0 pentru align-right) la momentul potrivit.
+
+### 6.4 Logica Combinațională vs. Secvențială
+
+Modulul folosește o abordare hibridă:
+
+```verilog
+always @(*) begin
+    internal_pwm_comb = ...  // Calculează valoarea dorită
+end
+
+always @(posedge clk) begin
+    internal_pwm <= internal_pwm_comb;  // Înregistrează valoarea
+end
+```
+
+Logica combinațională (`internal_pwm_comb`) calculează continuu valoarea PWM dorită pe baza counter-ului și comparatorilor. Logica secvențială înregistrează această valoare la fiecare ciclu de ceas, asigurând stabilitatea semnalului de ieșire și evitând glitch-urile.
+
+### 6.5 Activarea PWM
+
+```verilog
+if (pwm_en) begin
+    internal_pwm <= internal_pwm_comb;
+end
+```
+
+Semnalul PWM este actualizat doar când `pwm_en = 1`. Când PWM este dezactivat, ieșirea rămâne "înghețată" la ultima valoare, conform cerințelor.
+
+## 7. Modulul Top (`top.v`)
+
+### 7.1 Integrarea Componentelor
+
+Modulul `top` instanțiază și interconectează toate cele 5 submodule, formând perifericul complet. Acesta definește interfața externă completă:
+
+**Intrări**:
+- `clk`, `rst_n`: Ceasul și reset-ul perifericului (10MHz)
+- `sclk`, `cs_n`, `mosi`: Semnale SPI de la master
+- `pwm_out`: Semnalul PWM generat
+
+**Ieșiri**:
+- `miso`: Linia de date SPI către master
+
+### 7.2 Fluxul de Semnale
+
+Fluxul de date prin periferic urmează următoarea cale:
+
+1. **SPI → Decoder**: `spi_bridge` primește bytes prin MOSI și le oferă prin `data_in` + `byte_sync`
+2. **Decoder → Regs**: `instr_dcd` generează `read`/`write`, `addr`, `data_write` pentru acces la registre
+3. **Regs → Counter/PWM**: Registrele furnizează parametrii de configurație (`period`, `compare1`, etc.)
+4. **Counter → PWM**: Counter-ul furnizează `counter_val` pentru generarea PWM
+5. **PWM → Exterior**: `pwm_gen` produce semnalul final pe `pwm_out`
+6. **Regs → Decoder → SPI**: Pentru citiri, datele revin prin `data_read` → `data_out` → MISO
+
+### 7.3 Observație Importantă
+
+Există o conexiune necompletată în fișierul original:
+```verilog
+instr_dcd i_instr_dcd (
+    .byte_sync(),  // <- port neconectat
+    // ...
+);
+```
+
+Portul `byte_sync` al decodorului nu este conectat la semnalul `byte_sync` de la SPI bridge. Aceasta ar trebui corectată în `.byte_sync(byte_sync)`.
+
+## 8. Particularități ale Implementării
+
+### 8.1 Alegeri de Design
+
+1. **Registrele pe 16 biți sunt accesate doar pe 8 biți low**: Deși arhitectura prevede adresare HIGH/LOW, implementarea actuală scrie doar în `[7:0]`. Aceasta este o limitare a implementării curente.
+
+2. **Counter intern pentru prescaler**: Folosirea unui counter separat (`cnt`) pentru prescaler simplifică logica și oferă control precis asupra ritmului de incrementare.
+
+3. **Auto-clear pentru COUNTER_RESET**: Implementat prin delay counter în modulul `regs`, asigurând comportamentul one-shot necesar.
+
+4. **Anticiparea overflow-ului în PWM**: Mecanismul cu `is_counter_about_to_reset` permite tranziții sincrone și corecte ale semnalului PWM la limitele perioadei.
+
+### 8.2 Considerații de Timing
+
+- Toate modulele (exceptând logica SPI din `spi_bridge`) operează în domeniul de ceas principal (CLK)
+- Semnalul `byte_sync` servește ca punct de sincronizare între domeniile SPI și CLK
+- Counter-ul se actualizează la fiecare ciclu când este activ, modificările în registre devin vizibile imediat
+
+### 8.3 Testare și Validare
+
+Pentru testarea completă a perifericului, următoarele scenarii ar trebui validate:
+- Comunicare SPI: citire/scriere corectă la toate adresele
+- Funcționarea counter-ului în ambele direcții și cu diverse valori de prescale
+- Generarea corectă a PWM în toate cele 3 moduri
+- Auto-clear al COUNTER_RESET
+- Modificări dinamice ale configurației în timpul funcționării
+
+## 9. Concluzie
+
+Implementarea realizează un periferic PWM funcțional cu caracteristicile principale descrise în cerință. Arhitectura modulară facilitează înțelegerea, testarea și eventual extinderea funcționalității. Principalele puncte forte ale implementării sunt:
+
+- Separarea clară a responsabilităților între module
+- Utilizarea eficientă a prescaler-ului prin shift-uri (2^n)
+- Mecanisme de sincronizare între domenii de ceas
+- Flexibilitate în configurarea modurilor PWM
+
+Limitările cunoscute (adresare incompletă pe 16 biți, conexiune lipsă în top) pot fi abordate în iterații viitoare ale design-ului.
