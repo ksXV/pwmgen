@@ -18,45 +18,51 @@ localparam FUNCTION_ALIGN_RIGHT = 2'b01;
 localparam FUNCTION_RANGE_BETWEEN_COMPARES = 2'b10;
 
 reg internal_pwm = 1'b0;
+reg internal_pwm_comb = 1'b0;
 reg is_counter_about_to_reset = 1'b0;
 
 assign pwm_out = internal_pwm;
 
 always @(*) begin
-    internal_pwm = (functions[1]) ? (compare1 == count_val) : ~functions[0];
-    is_counter_about_to_reset = 1'b0;
+    if (!rst_n) begin
+      internal_pwm_comb = 1'b0;  
+    end else begin
+        internal_pwm_comb = (functions[1]) ? (compare1 == count_val) : ~functions[0];
 
-    if ((count_val + 1) == period) is_counter_about_to_reset = 1'b1;
-    case (functions) 
-        FUNCTION_ALIGN_LEFT: if (!is_counter_about_to_reset) internal_pwm = (compare1 > count_val);
-        FUNCTION_ALIGN_RIGHT: if (!is_counter_about_to_reset) internal_pwm = (count_val > compare1);
-        FUNCTION_RANGE_BETWEEN_COMPARES: if (!is_counter_about_to_reset) internal_pwm = (count_val >= compare1 && count_val < compare2);
-        default:;
-    endcase
+        case (functions) 
+            FUNCTION_ALIGN_LEFT: if (!is_counter_about_to_reset) internal_pwm_comb = (compare1 > count_val);
+            FUNCTION_ALIGN_RIGHT: if (!is_counter_about_to_reset) internal_pwm_comb = (count_val >= compare1);
+            FUNCTION_RANGE_BETWEEN_COMPARES: if (!is_counter_about_to_reset) internal_pwm_comb = (count_val >= compare1 && count_val < compare2);
+            default:;
+        endcase
+    end
 end
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         internal_pwm <= 1'b0;
-        is_counter_about_to_reset <= 1'b0;
+        is_counter_about_to_reset <= 1'b0;  
     end else begin
         if (pwm_en) begin
+            if ((period > 1) && (count_val+1) == (period-1)) is_counter_about_to_reset <= 1'b1;
             case (functions) 
                 FUNCTION_ALIGN_LEFT: begin
                     if (is_counter_about_to_reset) begin
                         internal_pwm <= 1'b1;
                         is_counter_about_to_reset <= 1'b0;
-                    end
+                    end else internal_pwm <= internal_pwm_comb;
                 end
                 FUNCTION_ALIGN_RIGHT: begin
                     if (is_counter_about_to_reset) begin
                         internal_pwm <= 1'b0;
                         is_counter_about_to_reset <= 1'b0;
-                    end
+                    end else internal_pwm <= internal_pwm_comb;
                 end
                 FUNCTION_RANGE_BETWEEN_COMPARES: begin 
-                    if (is_counter_about_to_reset) 
+                    if (is_counter_about_to_reset) begin 
                         is_counter_about_to_reset <= 1'b0;
+                        //figure what to do here
+                    end else internal_pwm <= internal_pwm_comb;
                 end
                 default:; // do nothing
             endcase

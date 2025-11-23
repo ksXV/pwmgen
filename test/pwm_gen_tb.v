@@ -7,7 +7,7 @@ reg clk = 1'b1;
 reg rst_n = 1'b1;
 reg pwm_en = 1'b0;
 reg [15:0] period;
-reg [7:0] functions;
+reg [1:0] functions;
 reg [15:0] compare1;
 reg [15:0] compare2;
 reg [15:0] count_val;
