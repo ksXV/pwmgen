@@ -18,21 +18,21 @@ module regs (
     output[7:0] prescale,
     // PWM signal programming values
     output pwm_en,
-    output[7:0] functions,
+    output[1:0] functions,
     output[15:0] compare1,
     output[15:0] compare2
 );
 
-localparam PERIOD_ADDRESS        = 8'h00;
-localparam COUNTER_EN_ADDRESS    = 8'h02;
-localparam COMPARE1_ADDRESS      = 8'h03;
-localparam COMPARE2_ADDRESS      = 8'h05;
-localparam COUNTER_RESET_ADDRESS = 8'h07;
-localparam COUNTER_VAL_ADDRESS   = 8'h08;
-localparam PRESCALE_ADDRESS      = 8'h0A;
-localparam UPNOTDOWN_ADDRESS     = 8'h0B;
-localparam PWM_EN_ADDRESS        = 8'h0C;
-localparam FUNCTIONS_ADDRESS     = 8'h0D;
+localparam PERIOD_ADDRESS        = 6'h00;
+localparam COUNTER_EN_ADDRESS    = 6'h02;
+localparam COMPARE1_ADDRESS      = 6'h03;
+localparam COMPARE2_ADDRESS      = 6'h05;
+localparam COUNTER_RESET_ADDRESS = 6'h07;
+localparam COUNTER_VAL_ADDRESS   = 6'h08;
+localparam PRESCALE_ADDRESS      = 6'h0A;
+localparam UPNOTDOWN_ADDRESS     = 6'h0B;
+localparam PWM_EN_ADDRESS        = 6'h0C;
+localparam FUNCTIONS_ADDRESS     = 6'h0D;
 
 /*
     All registers that appear in this block should be similar to this. Please try to abide
@@ -83,23 +83,23 @@ always @(posedge clk or negedge rst_n) begin
         if (write) begin
             case (addr) 
                 PERIOD_ADDRESS:
-                    period_reg <= data_write;
+                    period_reg[7:0] <= data_write;
                 COUNTER_EN_ADDRESS:
-                    counter_en_reg <= {7'b0, data_write[0]};
+                    counter_en_reg <= data_write[0];
                 COMPARE1_ADDRESS:
-                    compare1_reg <= data_write;
+                    compare1_reg[7:0] <= data_write;
                 COMPARE2_ADDRESS:
-                    compare2_reg <= data_write;
+                    compare2_reg[7:0] <= data_write;
                 COUNTER_RESET_ADDRESS:
-                    counter_reset_reg <= {7'b0, data_write[0]};
+                    counter_reset_reg <= data_write[0];
                 PRESCALE_ADDRESS:
                     prescale_reg <= data_write;
                 UPNOTDOWN_ADDRESS:
-                    upnotdown_reg <= {7'b0, data_write[0]};
+                    upnotdown_reg <= data_write[0];
                 PWM_EN_ADDRESS:
-                    pwm_en_reg <= {7'b0, data_write[0]};
+                    pwm_en_reg <= data_write[0];
                 FUNCTIONS_ADDRESS:
-                    functions_reg <= {6'b0, data_write[1:0]};
+                    functions_reg <= data_write[1:0];
                 default: /* do nothing */ ;
             endcase
         end 

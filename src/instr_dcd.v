@@ -31,7 +31,7 @@ localparam NEEDS_FIRST_BYTE = 3'b000;
 // 111 - read/write in/din sectiunea [15:8] dintr-un registru??? / daca bitul e zero atunci 
 //       scriem/citim din/in sectiunea [7:0] a registrului respectiv
 reg [2:0] internal_state = NEEDS_FIRST_BYTE;
-reg [5:0] address = 5'b00000;
+reg [5:0] address = 6'b00000;
 reg [7:0] internal_buffer = 8'd0;
 reg send_data = 1'b0;
 
@@ -46,14 +46,15 @@ assign addr = (internal_state[0]) ? address : 6'd0;
 always @(negedge rst_n) begin
     if (!rst_n) begin
         internal_state <= 3'd0;
-        address <= 5'd0;
+        address <= 6'd0;
         internal_buffer <= 8'd0;
         send_data <= 1'b0;
     end
 end
 
 
-always @(byte_sync) begin
+// verilator lint_off LATCH
+always @(*) begin
     if (byte_sync) begin
         // incepem sa citim primul byte asa ca 
         // il decodam in internal state
@@ -81,8 +82,10 @@ always @(byte_sync) begin
                 send_data = 1'b1;
                 internal_buffer = data_read;
             end
+            default:; // do nothing
         endcase
     end
 end
+// verilator lint_on LATCH
 
 endmodule

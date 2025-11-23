@@ -9,19 +9,19 @@ module top(
     // SPI master facing signals
     input sclk,
     input cs_n,
-    input miso,
-    output mosi,
+    input mosi,
+    output miso,
     // peripheral signals
     output pwm_out
 );
 
-wire clk;
-wire rst_n;
+// wire clk;
+// wire rst_n;
 
-wire sclk;
-wire cs_n;
-wire miso;
-wire mosi;
+// wire sclk;
+// wire cs_n;
+// wire miso;
+// wire mosi;
 
 wire byte_sync;
 wire[7:0] data_in;
@@ -40,7 +40,7 @@ wire upnotdown;
 wire[7:0] prescale;
 
 wire pwm_en;
-wire[7:0] functions;
+wire[1:0] functions;
 wire[15:0] compare1;
 wire[15:0] compare2;
 
@@ -50,7 +50,10 @@ spi_bridge i_spi_bridge (
     .sclk(sclk),
     .cs_n(cs_n),
     .miso(miso),
-    .mosi(mosi)
+    .mosi(mosi),
+    .byte_sync(byte_sync),
+    .data_in(data_in),
+    .data_out(data_out)
 );
 
 instr_dcd i_instr_dcd (
