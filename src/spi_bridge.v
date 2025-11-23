@@ -24,20 +24,24 @@ reg [7:0] byte_buffer = 8'd0;
 reg is_read  = 1'b0;
 reg is_write = 1'b0;
 reg was_first_byte_read = 1'b0;
+reg is_first_byte_about_to_be_ready = 1'b0;
 
 assign byte_sync = (bits_read == IS_FULL) ? 1'b1 : 1'b0;
 assign data_in = (bits_read == IS_FULL) ? byte_buffer : 8'd0;
 assign miso = (was_first_byte_read && is_write) ? data_out[bits_written] : 1'b0;
 
+
 always @(posedge sclk or negedge rst_n) begin
     if (!rst_n) begin
         byte_buffer <= 8'd0;
         bits_read <= 4'd0;
-        byte_buffer <= 8'd0;
+        bits_written <= 3'd0;
+
         is_read <= 1'b0;
         is_write <= 1'b0;
         was_first_byte_read <= 1'b0;
-        bits_written <= 3'd0;
+        is_first_byte_about_to_be_ready <= 1'b0;
+
     end else begin
         if (!cs_n) begin
             if (!was_first_byte_read) begin
@@ -46,6 +50,16 @@ always @(posedge sclk or negedge rst_n) begin
                 byte_buffer[0] <= mosi;
                 if (bits_read != IS_FULL) bits_read <= bits_read + 1;
                 else bits_read <= 1;
+                if (bits_read == 1) begin
+                    is_write <= byte_buffer[0];
+                    is_read <= ~byte_buffer[0];
+                end
+                if (is_first_byte_about_to_be_ready) begin 
+                    was_first_byte_read <= 1'b1;
+                    is_first_byte_about_to_be_ready <= 1'b0;
+                end
+
+                if (bits_read == (IS_FULL-2)) is_first_byte_about_to_be_ready <= 1'b1;
             end else begin
                 if (is_read) begin
                     byte_buffer <= byte_buffer << 1;
@@ -56,23 +70,13 @@ always @(posedge sclk or negedge rst_n) begin
                 else if (is_write) begin
                     if (bits_read == IS_FULL) bits_read <= 0;
 
-                    if ( ({1'b0, bits_written}) != (IS_FULL-1)) bits_written <= bits_written + 1;
+                    if (({1'b0, bits_written}) != (IS_FULL-1)) bits_written <= bits_written + 1;
                     else bits_written <= 0;
                 end
             end
         end
     end
 end
-
-// verilator lint_off LATCH
-always @(*) begin
-    if ((bits_read == IS_FULL) && (was_first_byte_read == 1'b0)) begin
-        was_first_byte_read = 1'b1;
-        is_write = byte_buffer[7];
-        is_read = ~is_write;
-    end
-end
-// verilator lint_off LATCH
 
 
 endmodule

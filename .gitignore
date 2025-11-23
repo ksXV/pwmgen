@@ -1,2 +1,4 @@
 /build
 /obj_dir
+*.vcd
+*.out
