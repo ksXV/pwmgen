@@ -51,6 +51,8 @@ reg [1:0] functions_reg;
 
 reg [7:0] buffer_for_reading;
 
+reg reset_delay_counter = 1'b0;
+
 assign data_read = (read) ? buffer_for_reading : 8'b0;
 
 assign period = period_reg;
@@ -80,6 +82,15 @@ always @(posedge clk or negedge rst_n) begin
         buffer_for_reading <= 8'h00;
     end
     else begin
+        if (counter_reset_reg) begin
+            if (reset_delay_counter) begin
+                reset_delay_counter <= 1'b0;
+                counter_reset_reg <= 1'b0;
+            end else begin
+                reset_delay_counter <= 1'b1;
+            end
+        end
+
         if (write) begin
             case (addr) 
                 PERIOD_ADDRESS:
