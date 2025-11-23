@@ -43,49 +43,44 @@ assign data_out = (read && send_data) ? internal_buffer : 8'd0;
 
 assign addr = (internal_state[0]) ? address : 6'd0;
 
-always @(negedge rst_n) begin
+always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         internal_state <= 3'd0;
         address <= 6'd0;
         internal_buffer <= 8'd0;
         send_data <= 1'b0;
-    end
-end
-
-
-// verilator lint_off LATCH
-always @(*) begin
-    if (byte_sync) begin
-        // incepem sa citim primul byte asa ca 
-        // il decodam in internal state
-        case (internal_state) 
-            NEEDS_FIRST_BYTE: begin
-                internal_state[2] = 1'b1;
-                internal_state[1] = data_in[7];
-                internal_state[0] = data_in[6];
-                address[5:0] = data_in[5:0];
-            end
-            READY_WRITE_HI: begin
-                send_data = 1'b1;
-                internal_buffer = data_in;
-            end
-            READY_WRITE_LO: begin
-                send_data = 1'b1;
-                internal_buffer = data_in;
+    end else begin
+        if (byte_sync) begin
+            // incepem sa citim primul byte asa ca 
+            // il decodam in internal state
+            case (internal_state) 
+                NEEDS_FIRST_BYTE: begin
+                    internal_state[2] <= 1'b1;
+                    internal_state[1] <= data_in[7];
+                    internal_state[0] <= data_in[6];
+                    address[5:0] <= data_in[5:0];
+                end
                 //needs to set a flag for the lower or higher position
-            end
-            READY_READ_HI: begin
-                send_data = 1'b1;
-                internal_buffer = data_read;
-            end
-            READY_READ_LO: begin
-                send_data = 1'b1;
-                internal_buffer = data_read;
-            end
-            default:; // do nothing
-        endcase
+                READY_WRITE_HI: begin
+                    send_data <= 1'b1;
+                    internal_buffer <= data_in;
+                end
+                READY_WRITE_LO: begin
+                    send_data <= 1'b1;
+                    internal_buffer <= data_in;
+                end
+                READY_READ_HI: begin
+                    send_data <= 1'b1;
+                    internal_buffer <= data_read;
+                end
+                READY_READ_LO: begin
+                    send_data <= 1'b1;
+                    internal_buffer <= data_read;
+                end
+                default:; // do nothing
+            endcase
+        end
     end
 end
-// verilator lint_on LATCH
 
 endmodule
