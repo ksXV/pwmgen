@@ -25,14 +25,14 @@ assign pwm_out = internal_pwm;
 
 always @(*) begin
     if (!rst_n) begin
-      internal_pwm_comb = 1'b0;  
+        internal_pwm_comb = 1'b0;  
     end else begin
         internal_pwm_comb = (functions[1]) ? (compare1 == count_val) : ~functions[0];
 
         case (functions) 
             FUNCTION_ALIGN_LEFT: if (!is_counter_about_to_reset) internal_pwm_comb = (compare1 > count_val);
             FUNCTION_ALIGN_RIGHT: if (!is_counter_about_to_reset) internal_pwm_comb = (count_val >= compare1);
-            FUNCTION_RANGE_BETWEEN_COMPARES: if (!is_counter_about_to_reset) internal_pwm_comb = (count_val >= compare1 && count_val < compare2);
+            FUNCTION_RANGE_BETWEEN_COMPARES: if (!is_counter_about_to_reset) internal_pwm_comb = (count_val > compare1 && count_val < compare2);
             default:;
         endcase
     end
@@ -61,11 +61,13 @@ always @(posedge clk or negedge rst_n) begin
                 FUNCTION_RANGE_BETWEEN_COMPARES: begin 
                     if (is_counter_about_to_reset) begin 
                         is_counter_about_to_reset <= 1'b0;
-                        //figure what to do here
+                        internal_pwm <= 1'b0;
                     end else internal_pwm <= internal_pwm_comb;
                 end
                 default:; // do nothing
             endcase
+        end else begin
+            internal_pwm <= 1'b0;
         end
     end
 end

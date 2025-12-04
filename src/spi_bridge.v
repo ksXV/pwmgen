@@ -31,7 +31,7 @@ assign data_in = (bits_read == IS_FULL) ? byte_buffer : 8'd0;
 assign miso = (was_first_byte_read && is_write) ? data_out[bits_written] : 1'b0;
 
 
-always @(posedge sclk or negedge rst_n) begin
+always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         byte_buffer <= 8'd0;
         bits_read <= 4'd0;
@@ -41,7 +41,6 @@ always @(posedge sclk or negedge rst_n) begin
         is_write <= 1'b0;
         was_first_byte_read <= 1'b0;
         is_first_byte_about_to_be_ready <= 1'b0;
-
     end else begin
         if (!cs_n) begin
             if (!was_first_byte_read) begin
@@ -61,19 +60,32 @@ always @(posedge sclk or negedge rst_n) begin
 
                 if (bits_read == (IS_FULL-2)) is_first_byte_about_to_be_ready <= 1'b1;
             end else begin
-                if (is_read) begin
+                if (is_write) begin
                     byte_buffer <= byte_buffer << 1;
                     byte_buffer[0] <= mosi;
                     if (bits_read != IS_FULL) bits_read <= bits_read + 1;
-                    else bits_read <= 1;
+                    else begin 
+                        bits_read <= 1;
+                    end
                 end
-                else if (is_write) begin
+                else if (is_read) begin
                     if (bits_read == IS_FULL) bits_read <= 0;
 
                     if (({1'b0, bits_written}) != (IS_FULL-1)) bits_written <= bits_written + 1;
-                    else bits_written <= 0;
+                    else begin 
+                        bits_written <= 0;
+                    end
                 end
             end
+        end else begin
+            byte_buffer <= 8'b00000000;
+            bits_read <= 4'd0;
+            bits_written <= 3'd0;
+
+            is_read <= 1'b0;
+            is_write <= 1'b0;
+            was_first_byte_read <= 1'b0;
+            is_first_byte_about_to_be_ready <= 1'b0;
         end
     end
 end

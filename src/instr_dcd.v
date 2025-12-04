@@ -34,11 +34,12 @@ reg [2:0] internal_state = NEEDS_FIRST_BYTE;
 reg [5:0] address = 6'b00000;
 reg [7:0] internal_buffer = 8'd0;
 reg send_data = 1'b0;
+reg should_reset = 1'b0;
 
 assign write = (internal_state[2]) ? internal_state[1] : read;
 assign read = (internal_state[2]) ? ~write : 0;
 
-assign data_write = (write && send_data) ? internal_buffer : 8'hf0;
+assign data_write = (write && send_data) ? internal_buffer : 8'd0;
 assign data_out = (read && send_data) ? internal_buffer : 8'd0;
 
 assign addr = (internal_state[0]) ? address : 6'd0;
@@ -50,6 +51,11 @@ always @(posedge clk or negedge rst_n) begin
         internal_buffer <= 8'd0;
         send_data <= 1'b0;
     end else begin
+        if (should_reset) begin
+            should_reset <= 1'b0;
+            internal_state <= 3'd0;
+            send_data <= 1'd0;
+        end
         if (byte_sync) begin
             // incepem sa citim primul byte asa ca 
             // il decodam in internal state
@@ -64,18 +70,22 @@ always @(posedge clk or negedge rst_n) begin
                 READY_WRITE_HI: begin
                     send_data <= 1'b1;
                     internal_buffer <= data_in;
+                    should_reset <= 1'b1;
                 end
                 READY_WRITE_LO: begin
                     send_data <= 1'b1;
                     internal_buffer <= data_in;
+                    should_reset <= 1'b1;
                 end
                 READY_READ_HI: begin
                     send_data <= 1'b1;
                     internal_buffer <= data_read;
+                    should_reset <= 1'b1;
                 end
                 READY_READ_LO: begin
                     send_data <= 1'b1;
                     internal_buffer <= data_read;
+                    should_reset <= 1'b1;
                 end
                 default:; // do nothing
             endcase
