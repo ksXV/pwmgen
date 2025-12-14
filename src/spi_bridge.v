@@ -26,9 +26,9 @@ reg is_write = 1'b0;
 reg was_first_byte_read = 1'b0;
 reg is_first_byte_about_to_be_ready = 1'b0;
 
-assign byte_sync = (bits_read == IS_FULL) ? 1'b1 : 1'b0;
+assign byte_sync = (bits_read == IS_FULL || ({1'b0, bits_written} == (IS_FULL - 1))) ? 1'b1 : 1'b0;
 assign data_in = (bits_read == IS_FULL) ? byte_buffer : 8'd0;
-assign miso = (was_first_byte_read && is_write) ? data_out[bits_written] : 1'b0;
+assign miso = (was_first_byte_read && is_read) ? data_out[7 - bits_written] : 1'b0;
 
 
 always @(posedge clk or negedge rst_n) begin

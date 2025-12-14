@@ -199,6 +199,7 @@ module tb_top_system;
 
         $display("\n--- Test 4: PWM UNALIGNED EDGE CASE EQUAL COMPARES ---");
         spi_write_reg(REG_COUNTER_EN, 8'h00);
+        spi_write_reg(REG_FUNCTIONS, {6'b0, FUNCTION_RANGE_BETWEEN_COMPARES});
         spi_write_reg(REG_COMPARE1, 8'h05);
         spi_write_reg(REG_COMPARE2, 8'h05);
         spi_write_reg(REG_COUNTER_EN, 8'h01);

@@ -40,7 +40,7 @@ assign write = (internal_state[2]) ? internal_state[1] : read;
 assign read = (internal_state[2]) ? ~write : 0;
 
 assign data_write = (write && send_data) ? internal_buffer : 8'd0;
-assign data_out = (read && send_data) ? internal_buffer : 8'd0;
+assign data_out = (read) ? data_read : 8'd0;
 
 assign addr = (internal_state[0]) ? address : 6'd0;
 
@@ -65,6 +65,7 @@ always @(posedge clk or negedge rst_n) begin
                     internal_state[1] <= data_in[7];
                     internal_state[0] <= data_in[6];
                     address[5:0] <= data_in[5:0];
+                    // send_data <= data_in[7];
                 end
                 //needs to set a flag for the lower or higher position
                 READY_WRITE_HI: begin
@@ -78,13 +79,9 @@ always @(posedge clk or negedge rst_n) begin
                     should_reset <= 1'b1;
                 end
                 READY_READ_HI: begin
-                    send_data <= 1'b1;
-                    internal_buffer <= data_read;
                     should_reset <= 1'b1;
                 end
                 READY_READ_LO: begin
-                    send_data <= 1'b1;
-                    internal_buffer <= data_read;
                     should_reset <= 1'b1;
                 end
                 default:; // do nothing

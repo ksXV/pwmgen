@@ -31,8 +31,8 @@ always @(*) begin
 
         case (functions) 
             FUNCTION_ALIGN_LEFT: if (!is_counter_about_to_reset) internal_pwm_comb = (compare1 > count_val);
-            FUNCTION_ALIGN_RIGHT: if (!is_counter_about_to_reset) internal_pwm_comb = (count_val >= compare1);
-            FUNCTION_RANGE_BETWEEN_COMPARES: if (!is_counter_about_to_reset) internal_pwm_comb = (count_val > compare1 && count_val < compare2);
+            FUNCTION_ALIGN_RIGHT: if (!is_counter_about_to_reset) internal_pwm_comb = ~((compare1 - 1) > count_val);
+            FUNCTION_RANGE_BETWEEN_COMPARES: if (!is_counter_about_to_reset) internal_pwm_comb = (compare1 == compare2) ? 1'b0 : (count_val >= compare1 && count_val < compare2);
             default:;
         endcase
     end
@@ -48,7 +48,7 @@ always @(posedge clk or negedge rst_n) begin
             case (functions) 
                 FUNCTION_ALIGN_LEFT: begin
                     if (is_counter_about_to_reset) begin
-                        internal_pwm <= 1'b1;
+                        internal_pwm <= (compare1 != 0);
                         is_counter_about_to_reset <= 1'b0;
                     end else internal_pwm <= internal_pwm_comb;
                 end
