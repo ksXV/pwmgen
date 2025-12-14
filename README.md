@@ -1,6 +1,11 @@
 # Documentație Tehnică - Generator Semnal PWM
 ### Echipa: Neamu Ciprian, Voiculescu Nicolae, Babencu Cristian
 ### Grupa: 333AA
+
+## Mentiuni:
+
+`top.v` a fost  modificat deoarece acesta nu era complet.
+
 ## 1. Introducere
 
 Această documentație descrie implementarea unui periferic hardware pentru generarea semnalelor PWM (Pulse Width Modulation) în limbajul Verilog. Perifericul este conceput să funcționeze ca un modul slave într-un sistem mai complex, comunicând prin protocolul SPI și oferind control flexibil asupra caracteristicilor semnalului PWM generat.
@@ -58,7 +63,7 @@ Flag-ul `was_first_byte_read` se activează după completarea primului byte și 
 #### 2.2.4 Logica de Transmisie (MISO)
 
 ```verilog
-assign miso = (was_first_byte_read && is_write) ? data_out[bits_written] : 1'b0;
+assign miso = (was_first_byte_read && is_write) ? data_out[7 - bits_written] : 1'b0;
 ```
 
 Pentru operațiile de citire, după ce primul byte a fost procesat, bridge-ul transmite pe MISO byte-ul de date primit de la modulul `instr_dcd` prin semnalul `data_out`. Biții sunt trimiși în ordine, indexați prin counter-ul `bits_written`.
