@@ -1,6 +1,4 @@
 # Documentație Tehnică - Generator Semnal PWM
-### Echipa: Neamu Ciprian, Voiculescu Nicolae, Babencu Cristian
-### Grupa: 333AA
 
 ## Mentiuni:
 
